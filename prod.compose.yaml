@@ -1,0 +1,9 @@
+services:
+  react-nginx-mytutorial:
+    image: ghcr.io/myxogastria0808/react-nginx-mytutorial/client:main
+    container_name: react-nginx-mytutorial
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    ports:
+      - "3000:80"
