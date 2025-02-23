@@ -1,50 +1,127 @@
-# React + TypeScript + Vite
+# react-nginx-mytutorial
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+## Dockerfile
 
-Currently, two official plugins are available:
+```Dockerfile
+FROM node:22.14.0-alpine3.21 AS node
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react/README.md) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+# Install dependencies only when needed
+FROM node AS deps
+WORKDIR /app
 
-## Expanding the ESLint configuration
+# Install dependencies based on the preferred package manager
+COPY package.json yarn.lock* package-lock.json* pnpm-lock.yaml* ./
+RUN \
+    if [ -f yarn.lock ]; then yarn --frozen-lockfile; \
+    elif [ -f package-lock.json ]; then npm ci; \
+    elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm i --frozen-lockfile; \
+    else echo "Lockfile not found." && exit 1; \
+    fi
 
-If you are developing a production application, we recommend updating the configuration to enable type aware lint rules:
 
-- Configure the top-level `parserOptions` property like this:
+# Rebuild the source code only when needed
+FROM node AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
 
-```js
-export default tseslint.config({
-  languageOptions: {
-    // other options...
-    parserOptions: {
-      project: ['./tsconfig.node.json', './tsconfig.app.json'],
-      tsconfigRootDir: import.meta.dirname,
-    },
-  },
-})
+RUN \
+    if [ -f yarn.lock ]; then yarn run build; \
+    elif [ -f package-lock.json ]; then npm run build; \
+    elif [ -f pnpm-lock.yaml ]; then corepack enable pnpm && pnpm run build; \
+    else echo "Lockfile not found." && exit 1; \
+    fi
+
+# Production image, copy all the files and run react
+FROM nginx:alpine AS runner
+COPY ./nginx/nginx.conf /etc/nginx/nginx.conf
+COPY --from=builder /app/dist /usr/share/nginx/html
+
+ENTRYPOINT ["nginx", "-g", "daemon off;"]
+EXPOSE 80
+services:
+  react-nginx-mytutorial:
+    image: react-nginx-mytutorial
+    container_name: client
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    ports:
+      - "3000:80"
+
 ```
 
-- Replace `tseslint.configs.recommended` to `tseslint.configs.recommendedTypeChecked` or `tseslint.configs.strictTypeChecked`
-- Optionally add `...tseslint.configs.stylisticTypeChecked`
-- Install [eslint-plugin-react](https://github.com/jsx-eslint/eslint-plugin-react) and update the config:
+## dev.compose.yaml
 
-```js
-// eslint.config.js
-import react from 'eslint-plugin-react'
+```yaml
+services:
+  react-nginx-mytutorial:
+    image: react-nginx-mytutorial
+    container_name: client
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    ports:
+      - "3000:80"
+```
 
-export default tseslint.config({
-  // Set the react version
-  settings: { react: { version: '18.3' } },
-  plugins: {
-    // Add the react plugin
-    react,
-  },
-  rules: {
-    // other rules...
-    // Enable its recommended rules
-    ...react.configs.recommended.rules,
-    ...react.configs['jsx-runtime'].rules,
-  },
-})
+## prod.compose.yaml
+
+```yaml
+services:
+  react-nginx-mytutorial:
+    image: ghcr.io/myxogastria0808/react-nginx-mytutorial/client:main
+    container_name: react-nginx-mytutorial
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    ports:
+      - "3000:80"
+```
+
+## nginx.conf
+
+```nginx.conf
+user nginx;
+worker_processes    auto;
+
+events {
+    worker_connections  1024;
+    multi_accept on;
+}
+
+http {
+    server {
+        listen 80;
+        server_name   localhost;
+        charset UTF-8;
+        include /etc/nginx/mime.types;
+
+        gzip on;
+        gzip_vary on;
+        gzip_proxied any;
+        gzip_comp_level 1;
+        gzip_min_length 1024;
+        gzip_types application/atom+xml
+            application/javascript
+            application/json
+            application/rss+xml
+            application/vnd.ms-fontobject
+            application/x-font-ttf
+            application/x-web-app-manifest+json
+            application/xhtml+xml
+            application/xml
+            font/opentype
+            image/svg+xml
+            image/x-icon
+            text/css
+            text/plain
+            text/x-component;
+
+        location / {
+            root /usr/share/nginx/html;
+            index index.html;
+        }
+    }
+}
 ```
